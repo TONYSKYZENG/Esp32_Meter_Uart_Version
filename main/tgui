@@ -1,0 +1,39 @@
+{
+    "fonts": [
+    ],
+    "images": [
+    ],
+    "lvgl": {
+        "name": "App",
+        "resolution": {
+            "height": 240,
+            "width": 320
+        },
+        "widgets": [
+            {
+                "accessible": false,
+                "class": "lv_gauge",
+                "critical value": 80,
+                "geometry": {
+                    "height": 100,
+                    "width": 100,
+                    "x": 41,
+                    "y": 26
+                },
+                "locked": false,
+                "name": "gauge_1",
+                "range": {
+                    "max": 100,
+                    "min": 0
+                },
+                "scale": {
+                    "angle": 220,
+                    "labels": 6,
+                    "lines": 21
+                },
+                "value": 0,
+                "widget": "Gauge"
+            }
+        ]
+    }
+}
