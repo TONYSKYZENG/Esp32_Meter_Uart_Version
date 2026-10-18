@@ -1,170 +1,197 @@
+/*  按键与 LED 指示
+ *
+ *  KEY1/KEY2/KEY3（GPIO16/17/18）通过 GPIO 中断产生事件，由队列交给任务处理；
+ *  LED 使用 LEDC 渐变（fade）实现呼吸效果，可在测量时启停。
+ */
 #include "mykeys.h"
+
+#include "esp_log.h"
 #include "ledfade.h"
-uint16_t g_k1Time;
-uint8_t isK1Isr;
-uint8_t g_fadeSt=0;
-//#include "myusb.h"
+
+static const char *TAG = "mykeys";
+
 #define LEDC_TEST_DUTY         (4000)
 #define LEDC_TEST_FADE_TIME    (2000)
-extern double g_i0,g_v0,g_i1,g_v1,g_w1;
- double g_power=0;
- double g_peak=0;
-uint8_t g_workSt=0;
-TaskHandle_t ledTask;
 
- ledc_channel_config_t ledc_channel= 
-        {
-            .channel    = LEDC_LS_CH0_CHANNEL,
-            .duty       = 0,
-            .gpio_num   = LEDC_LS_CH0_GPIO,
-            .speed_mode = LEDC_LS_MODE,
-            .hpoint     = 0,
-            .timer_sel  = LEDC_LS_TIMER,
-            .intr_type  = LEDC_INTR_FADE_END,
-        };
- ledc_timer_config_t ledc_timer = {
-        .duty_resolution = LEDC_TIMER_13_BIT, // resolution of PWM duty
-        .freq_hz = 5000,                      // frequency of PWM signal
-        .speed_mode = LEDC_LS_MODE,           // timer mode
-        .timer_num = LEDC_LS_TIMER,            // timer index
-        .clk_cfg = LEDC_AUTO_CLK,              // Auto select the source clock
-    }; 
-static xQueueHandle gpio_evt_queue = NULL;
+#define GPIO_EVT_QUEUE_LEN     (10)
+#define KEYS_TASK_STACK_SIZE   (2048)
+#define LED_TASK_STACK_SIZE    (4096)
+#define KEYS_TASK_PRIO         (10)
+#define LED_TASK_PRIO          (10)
 
-void startShow()
+extern double g_i0, g_v0, g_i1, g_v1, g_w1;
+
+double g_power = 0;
+double g_peak = 0;
+uint8_t g_workSt = 0;
+
+static TaskHandle_t ledTask;
+static QueueHandle_t gpio_evt_queue = NULL;
+
+static const ledc_channel_config_t ledc_channel = {
+    .channel    = LEDC_LS_CH0_CHANNEL,
+    .duty       = 0,
+    .gpio_num   = LEDC_LS_CH0_GPIO,
+    .speed_mode = LEDC_LS_MODE,
+    .hpoint     = 0,
+    .timer_sel  = LEDC_LS_TIMER,
+    .intr_type  = LEDC_INTR_FADE_END,
+};
+
+static const ledc_timer_config_t ledc_timer = {
+    .duty_resolution = LEDC_TIMER_13_BIT, // resolution of PWM duty
+    .freq_hz = 5000,                      // frequency of PWM signal
+    .speed_mode = LEDC_LS_MODE,           // timer mode
+    .timer_num = LEDC_LS_TIMER,           // timer index
+    .clk_cfg = LEDC_AUTO_CLK,             // Auto select the source clock
+};
+
+void startShow(void)
 {
-   vTaskResume(ledTask);
-   ledc_timer_resume(ledc_channel.speed_mode,LEDC_LS_TIMER);
+    if (ledTask == NULL) {
+        return;
+    }
+    vTaskResume(ledTask);
+    ledc_timer_resume(ledc_channel.speed_mode, LEDC_LS_TIMER);
 }
 
-void stopShow()
+void stopShow(void)
 {
-  vTaskSuspend(ledTask);
-   ledc_timer_pause(ledc_channel.speed_mode,LEDC_LS_TIMER);
-   
+    if (ledTask == NULL) {
+        return;
+    }
+    vTaskSuspend(ledTask);
+    ledc_timer_pause(ledc_channel.speed_mode, LEDC_LS_TIMER);
 }
 
 void startMes(void)
 {
-   g_workSt=1;
-    g_power=0.0;
+    g_workSt = 1;
+    g_power = 0.0;
     startShow();
-    g_peak=0;
+    g_peak = 0;
 }
+
 void stopMes(void)
 {
-   g_workSt=0;
-   stopShow();
+    g_workSt = 0;
+    stopShow();
 }
 
 void anaPower(void)
-{ double temp_i;
-  
-  if(g_workSt)
-  { temp_i=g_i0+g_i1;
-    g_power+=temp_i*g_v1*0.001*0.001*0.001;
-    if(g_w1>g_peak)
-    {
-      g_peak=g_w1;
-    }
-  }
-}
-static void IRAM_ATTR gpio_isr_handler(void* arg)
 {
-    uint32_t gpio_num = (uint32_t) arg;
+    double temp_i;
+
+    if (g_workSt) {
+        temp_i = g_i0 + g_i1;
+        g_power += temp_i * g_v1 * 0.001 * 0.001 * 0.001;
+        if (g_w1 > g_peak) {
+            g_peak = g_w1;
+        }
+    }
+}
+
+static void IRAM_ATTR gpio_isr_handler(void *arg)
+{
+    uint32_t gpio_num = (uint32_t)arg;
     xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
 }
 
-static void gpio_task_example(void* arg)
+static void gpio_task_example(void *arg)
 {
+    (void)arg;
     uint32_t io_num;
-    for(;;) {
-        if(xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) {
-            //printf("GPIO[%d] intr, val: %d\n", io_num, gpio_get_level(io_num));
-            switch (io_num)
-            {
+
+    for (;;) {
+        if (xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) {
+            switch (io_num) {
             case MYKEY1:
-               printf("k1 down\r\n");
-              startMes();
-               break;
-             case MYKEY2:
-               printf("k2 down\r\n");
-              
-               break;
-             case MYKEY3:
-               printf("k3 down\r\n");
+                ESP_LOGI(TAG, "k1 down");
+                startMes();
+                break;
+            case MYKEY2:
+                ESP_LOGI(TAG, "k2 down");
+                break;
+            case MYKEY3:
+                ESP_LOGI(TAG, "k3 down");
                 stopMes();
-               break;
+                break;
             default:
-               break;
+                break;
             }
         }
     }
 }
-void led_task_example(void* arg)
-{  stopShow();
-  while (1)
-  {
-    ledc_set_fade_with_time(ledc_channel.speed_mode,
-                    ledc_channel.channel, LEDC_TEST_DUTY, LEDC_TEST_FADE_TIME);
-   ledc_fade_start(ledc_channel.speed_mode,
-                    ledc_channel.channel, LEDC_FADE_NO_WAIT);
-   vTaskDelay(LEDC_TEST_FADE_TIME / portTICK_PERIOD_MS);
 
+static void led_task_example(void *arg)
+{
+    (void)arg;
 
-   ledc_set_fade_with_time(ledc_channel.speed_mode,
-                    ledc_channel.channel, 0, LEDC_TEST_FADE_TIME);
-            ledc_fade_start(ledc_channel.speed_mode,
-                    ledc_channel.channel, LEDC_FADE_NO_WAIT);
-        vTaskDelay(LEDC_TEST_FADE_TIME / portTICK_PERIOD_MS);   
-  }
-  
+    while (1) {
+        ledc_set_fade_with_time(ledc_channel.speed_mode,
+                                ledc_channel.channel, LEDC_TEST_DUTY, LEDC_TEST_FADE_TIME);
+        ledc_fade_start(ledc_channel.speed_mode,
+                        ledc_channel.channel, LEDC_FADE_NO_WAIT);
+        vTaskDelay(pdMS_TO_TICKS(LEDC_TEST_FADE_TIME));
+
+        ledc_set_fade_with_time(ledc_channel.speed_mode,
+                                ledc_channel.channel, 0, LEDC_TEST_FADE_TIME);
+        ledc_fade_start(ledc_channel.speed_mode,
+                        ledc_channel.channel, LEDC_FADE_NO_WAIT);
+        vTaskDelay(pdMS_TO_TICKS(LEDC_TEST_FADE_TIME));
+    }
 }
+
 void mykeys_init(void)
-{ uint64_t tv=1;
-tv=tv<<18;
-	gpio_config_t io_conf;
-    io_conf.intr_type = GPIO_INTR_NEGEDGE;
-    //bit mask of the pins, use GPIO4/5 here
-    io_conf.pin_bit_mask =MYKEYS_SEL|tv;
-	io_conf.pull_down_en = 0;
-    //set as input mode    
-    io_conf.mode = GPIO_MODE_INPUT;
-    //enable pull-up mode
-    io_conf.pull_up_en = 1;
-    gpio_config(&io_conf);
-   //create a queue to handle gpio event from isr
-    gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
+{
+    const gpio_config_t io_conf = {
+        .pin_bit_mask = MYKEYS_SEL,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_NEGEDGE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
+
+    //create a queue to handle gpio event from isr
+    gpio_evt_queue = xQueueCreate(GPIO_EVT_QUEUE_LEN, sizeof(uint32_t));
+    if (gpio_evt_queue == NULL) {
+        ESP_LOGE(TAG, "create gpio event queue failed");
+        return;
+    }
+
     //install gpio isr service
-    gpio_install_isr_service(0);
+    esp_err_t err = gpio_install_isr_service(0);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "gpio isr service not installed: %s", esp_err_to_name(err));
+    }
+
     ledFade_init();
-    printf("fade done\r\n");
-   gpio_isr_handler_add(MYKEY1, gpio_isr_handler, (void*) MYKEY1);
-     gpio_isr_handler_add(MYKEY2,gpio_isr_handler , (void*) MYKEY2);
-     gpio_isr_handler_add(MYKEY2,gpio_isr_handler , (void*) MYKEY3);
-     xTaskCreate(gpio_task_example, "gpio_task_example", 2048, NULL, 10, NULL);
-    //  gpio_isr_handler_add(MYKEY3, key3_isr_handler, (void*) MYKEY3);
-      g_k1Time=0;
+    ESP_LOGI(TAG, "fade done");
+
+    ESP_ERROR_CHECK(gpio_isr_handler_add(MYKEY1, gpio_isr_handler, (void *)MYKEY1));
+    ESP_ERROR_CHECK(gpio_isr_handler_add(MYKEY2, gpio_isr_handler, (void *)MYKEY2));
+    ESP_ERROR_CHECK(gpio_isr_handler_add(MYKEY3, gpio_isr_handler, (void *)MYKEY3));
+
+    xTaskCreate(gpio_task_example, "gpio_task_example", KEYS_TASK_STACK_SIZE, NULL, KEYS_TASK_PRIO, NULL);
 }
 
 void ledFade_init(void)
 {
-    int ch;
-
     /*
      * Prepare and set configuration of timers
      * that will be used by LED Controller
      */
-     
-    // Set configuration of timer0 for high speed channels
-    ledc_timer_config(&ledc_timer);
-    //ledc_channel
-    ledc_channel_config(&ledc_channel);
-     ledc_fade_func_install(0);
-     ledc_set_fade_with_time(ledc_channel.speed_mode,
-                    ledc_channel.channel, LEDC_TEST_DUTY, LEDC_TEST_FADE_TIME);
-   ledc_fade_start(ledc_channel.speed_mode,
+    ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
+    ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
+    ESP_ERROR_CHECK(ledc_fade_func_install(0));
+
+    ledc_set_fade_with_time(ledc_channel.speed_mode,
+                            ledc_channel.channel, LEDC_TEST_DUTY, LEDC_TEST_FADE_TIME);
+    ledc_fade_start(ledc_channel.speed_mode,
                     ledc_channel.channel, LEDC_FADE_NO_WAIT);
-     
-    xTaskCreate(led_task_example, "led_task_example", 4096, NULL, 10, &ledTask);
+
+    /* led_task_example 创建后先挂起，由 startShow() 在测量开始时恢复 */
+    xTaskCreate(led_task_example, "led_task_example", LED_TASK_STACK_SIZE, NULL, LED_TASK_PRIO, &ledTask);
+    stopShow();
 }

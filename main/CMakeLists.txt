@@ -3,8 +3,8 @@
 #)
 set(COMPONENT_SRCS "main.c"
 #"oled12864/o12864.c" "oled12864/ofont.o"
-"gui.c"
-"logo.c"
+#"gui.c"
+#"logo.c"
 "ina226/ina226.c"
 #"usb/myusb.c" 
 "keys/mykeys.c"
