@@ -14,7 +14,8 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "lvgl.h"
-
+#include "task_prio.h"
+#include "uart0.h"
 
 
 #define CONFIG_EXAMPLE_LCD_CONTROLLER_ILI9341 1
@@ -70,7 +71,7 @@ static const char *TAG = "example";
 #define EXAMPLE_LVGL_TASK_MAX_DELAY_MS 5000
 #define EXAMPLE_LVGL_TASK_MIN_DELAY_MS 5
 #define EXAMPLE_LVGL_TASK_STACK_SIZE   (6 * 1024)
-#define EXAMPLE_LVGL_TASK_PRIORITY     5
+#define EXAMPLE_LVGL_TASK_PRIORITY     TASK_PRIO_LVGL
 
 // LVGL library is not thread-safe, this example will call LVGL APIs from different tasks, so use a mutex to protect it
 static _lock_t lvgl_api_lock;
@@ -296,8 +297,7 @@ void app_main_lvgl_drv(void)
 #endif
 
     ESP_LOGI(TAG, "Create LVGL task");
-    int current_core = xPortGetCoreID();
-    int lvgl_core =0;
+    int lvgl_core = 0;   /* ESP32-S2 单核，固定到 CPU0 */
     xTaskCreatePinnedToCore(
         example_lvgl_port_task,    // 任务函数
         "LVGL_Task",              // 任务名称
@@ -313,4 +313,5 @@ void app_main_lvgl_drv(void)
     _lock_acquire(&lvgl_api_lock);
     lvgl_demo_ui(display);
     _lock_release(&lvgl_api_lock);
+    initUart0();
 }

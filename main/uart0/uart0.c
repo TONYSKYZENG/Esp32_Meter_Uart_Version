@@ -12,6 +12,7 @@
 #include "freertos/task.h"
 #include "mykeys.h"
 #include "uart0.h"
+#include "task_prio.h"
 
 static const char *TAG = "uart0";
 
@@ -37,11 +38,7 @@ enum {
     UART_VCMD_PEAK,
 };
 
-extern double g_power;
-extern double g_peak;
-
-/* 以原始字节形式回发一个 double 值 */
-static void uart_send_double(double value)
+/* 以原始字节形式回发一个 double 值 */static void uart_send_double(double value)
 {
     uart_write_bytes(ECHO_UART_PORT_NUM, (const char *)&value, sizeof(value));
 }
@@ -58,10 +55,10 @@ static void parse_cmd(const uint8_t *data, size_t len)
             stopMes();
             break;
         case UART_VCMD_PEAK:
-            uart_send_double(g_peak);
+            uart_send_double(mes_getPeak());
             return;
         case UART_VCMD_E:
-            uart_send_double(g_power);
+            uart_send_double(mes_getEnergy());
             return;
         default:
             break;
@@ -112,5 +109,5 @@ static void echo_task(void *arg)
 
 void initUart0(void)
 {
-    xTaskCreate(echo_task, "uart_echo_task", ECHO_TASK_STACK_SIZE, NULL, 10, NULL);
+    xTaskCreate(echo_task, "uart_echo_task", ECHO_TASK_STACK_SIZE, NULL, TASK_PRIO_UART, NULL);
 }

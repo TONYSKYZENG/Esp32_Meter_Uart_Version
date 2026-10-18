@@ -17,5 +17,7 @@ set(COMPONENT_ADD_INCLUDEDIRS
 "ina226"
 "uart0"
 "mytimer"
+"lvgl"
+"."
 )
 register_component()

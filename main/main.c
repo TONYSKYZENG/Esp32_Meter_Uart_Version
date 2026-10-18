@@ -23,13 +23,13 @@
 #include "ina226.h"
 #include "mykeys.h"
 #include "uart0.h"
+#include "gui.h"
+#include "task_prio.h"
 uint16_t g_runTime=0;
 uint16_t g_isrTime=0;
 uint16_t g_isrTimeP=0;
 uint8_t g_isTxData=0;
 uint16_t g_ly68Id=0;
-/* 测量量：原定义在已废弃的 gui.c 中，这里放回 main.c */
-double g_i0,g_v0,g_i1,g_v1,g_w1;
 
 /*********************
  *      DEFINES
@@ -41,7 +41,6 @@ double g_i0,g_v0,g_i1,g_v1,g_w1;
  * 采样定时器与 anaPower() 的能量积分共用该值 */
 #define METER_RUNTIME_DIVIDER   200      /* 200 个采样周期 = 1 s，用于统计运行时间 */
 #define METER_TASK_STACK_SIZE   4096
-#define METER_TASK_PRIO         5
 
 /**********************
  *  STATIC PROTOTYPES
@@ -83,10 +82,29 @@ static void meter_task(void *arg)
         const uint32_t elapsed_ms = (uint32_t)((now_us - last_sample_us) / 1000);
         last_sample_us = now_us;
 
-        g_v1 = ina226_getV(1);
-        g_i1 = ina226_getI(1);
-        g_w1 = ina226_getW(1);
-        anaPower(elapsed_ms);
+        /* 瞬时测量值只用任务内的局部变量，不再做跨线程共享的全局量 */
+        const double v1 = ina226_getV(1);
+        const double i1 = ina226_getI(1);
+        const double w1 = ina226_getW(1);
+
+        anaPower(elapsed_ms, i1, v1, w1);
+
+        /* 通过线程安全的快照把最新测量值发布给 LVGL 界面；
+         * 累计能耗由 mes_getEnergy() 在锁内读取，运行时间由 mes_getRunMs() 读取。
+         * 能耗换算成 mJ 发布（界面按数值大小自动切换 mJ / J），
+         * 超过 int32 量程时饱和，避免换算溢出为负数。 */
+        const double energy_j = mes_getEnergy();
+        int32_t energy_mj;
+        if (energy_j <= 0.0) {
+            energy_mj = 0;
+        } else if (energy_j >= 2147483.0) {
+            energy_mj = 2147483647;
+        } else {
+            energy_mj = (int32_t)(energy_j * 1000.0);
+        }
+
+        gui_publish_measurements((int32_t)v1, (int32_t)i1,
+                                 (int32_t)w1, energy_mj, mes_getRunMs());
 
         if (++g_isrTime >= METER_RUNTIME_DIVIDER) {
             g_isrTime = 0;
@@ -100,7 +118,7 @@ static void meter_task(void *arg)
 static void meter_init(void)
 {
     BaseType_t created = xTaskCreate(meter_task, "meter", METER_TASK_STACK_SIZE,
-                                     NULL, METER_TASK_PRIO, &s_meter_task);
+                                     NULL, TASK_PRIO_METER, &s_meter_task);
     ESP_ERROR_CHECK(created == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 
     const esp_timer_create_args_t args = {
@@ -134,7 +152,7 @@ mykeys_init();
 
  	//OLED_ShowString(0,0,(unsigned char *)"esp32 meter");
    //initI2CSlave();
-   initUart0();
+   
    /* 启动采样：esp_timer 5 ms 周期通知采样任务 */
    meter_init();
    app_main_lvgl_drv();
