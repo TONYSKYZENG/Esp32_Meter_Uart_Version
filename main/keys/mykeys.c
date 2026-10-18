@@ -84,7 +84,9 @@ void anaPower(void)
 
     if (g_workSt) {
         temp_i = g_i0 + g_i1;
-        g_power += temp_i * g_v1 * 0.001 * 0.001 * 0.001;
+        /* g_i: mA, g_v: mV -> 瞬时功率 P = i * v * 1e-6 (W)
+         * 单个采样周期的能量 E = P * (METER_SAMPLE_PERIOD_MS 毫秒)，累加得到 g_power(J) */
+        g_power += temp_i * g_v1 * 0.001 * 0.001 * (METER_SAMPLE_PERIOD_MS * 0.001);
         if (g_w1 > g_peak) {
             g_peak = g_w1;
         }

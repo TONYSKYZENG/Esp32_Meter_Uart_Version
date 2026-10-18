@@ -19,6 +19,7 @@
 #include "freertos/semphr.h"
 #include "esp_system.h"
 #include "driver/gpio.h"
+#include "esp_timer.h"
 #include "ina226.h"
 #include "mykeys.h"
 #include "uart0.h"
@@ -27,9 +28,8 @@ uint16_t g_isrTime=0;
 uint16_t g_isrTimeP=0;
 uint8_t g_isTxData=0;
 uint16_t g_ly68Id=0;
-//double g_i0,g_v0,g_i1,g_v1,g_w1;
-/* Littlevgl specific */
-
+/* 测量量：原定义在已废弃的 gui.c 中，这里放回 main.c */
+double g_i0,g_v0,g_i1,g_v1,g_w1;
 
 /*********************
  *      DEFINES
@@ -37,12 +37,77 @@ uint16_t g_ly68Id=0;
 #define TAG "demo"
 #define LV_TICK_PERIOD_MS 1
 
+/* 采样周期由 METER_SAMPLE_PERIOD_MS 定义（见 mykeys.h），
+ * 采样定时器与 anaPower() 的能量积分共用该值 */
+#define METER_RUNTIME_DIVIDER   200      /* 200 个采样周期 = 1 s，用于统计运行时间 */
+#define METER_TASK_STACK_SIZE   4096
+#define METER_TASK_PRIO         5
+
 /**********************
  *  STATIC PROTOTYPES
  **********************/
-static void lv_tick_task(void *arg);
-static void guiTask(void *pvParameter);
-static void create_demo_application(void);
+static void meter_task(void *arg);
+static void meter_timer_cb(void *arg);
+static void meter_init(void);
+
+/**********************
+ *  MEASUREMENT UPDATE
+ **********************/
+static TaskHandle_t s_meter_task = NULL;
+static esp_timer_handle_t s_meter_timer = NULL;
+
+/* 定时器回调运行在 esp_timer 任务上下文里：只发一个任务通知就返回，
+ * 绝不在这里做 I2C 等阻塞操作（否则会拖垮 esp_timer 任务、破坏时基）。 */
+static void meter_timer_cb(void *arg)
+{
+    (void)arg;
+
+    if (s_meter_task != NULL) {
+        xTaskNotifyGive(s_meter_task);
+    }
+}
+
+/* 采样任务：每次通知采样一次，阻塞式 I2C 读取放在任务里完成 */
+static void meter_task(void *arg)
+{
+    (void)arg;
+
+    for (;;) {
+        /* 阻塞等待周期通知；返回值为自上次取走以来累积的通知次数 */
+        uint32_t samples = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        /* 正常情况下 samples == 1；若任务曾被抢占导致累积了多次通知，
+         * 按实际次数补采样，避免能量积分因丢 tick 而偏小 */
+        for (uint32_t i = 0; i < samples; i++) {
+            g_v1 = ina226_getV(1);
+            g_i1 = ina226_getI(1);
+            g_w1 = ina226_getW(1);
+            anaPower();
+
+            if (++g_isrTime >= METER_RUNTIME_DIVIDER) {
+                g_isrTime = 0;
+                g_runTime++;
+            }
+        }
+    }
+}
+
+/* 启动采样：用 esp_timer 做 5 ms 时基，回调只通知采样任务。
+ * FreeRTOS tick 默认 100 Hz（10 ms），因此周期 < 10 ms 时不用 vTaskDelay。 */
+static void meter_init(void)
+{
+    BaseType_t created = xTaskCreate(meter_task, "meter", METER_TASK_STACK_SIZE,
+                                     NULL, METER_TASK_PRIO, &s_meter_task);
+    ESP_ERROR_CHECK(created == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
+
+    const esp_timer_create_args_t args = {
+        .callback = meter_timer_cb,
+        .arg = NULL,
+        .name = "meter",
+    };
+    ESP_ERROR_CHECK(esp_timer_create(&args, &s_meter_timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(s_meter_timer, METER_SAMPLE_PERIOD_MS * 1000));
+}
 
 /**********************
  *   APPLICATION MAIN
@@ -67,5 +132,7 @@ mykeys_init();
  	//OLED_ShowString(0,0,(unsigned char *)"esp32 meter");
    //initI2CSlave();
    initUart0();
+   /* 启动采样：esp_timer 5 ms 周期通知采样任务 */
+   meter_init();
    // xTaskCreatePinnedToCore(guiTask, "gui", 4096*8, NULL, 0, NULL, 1);
 }

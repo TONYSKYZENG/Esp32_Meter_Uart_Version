@@ -27,7 +27,7 @@
 | 串口 TX | UART0 | GPIO7 | 发送数据到上位机 |
 | 串口 RX | UART0 | GPIO8 | 接收上位机命令 |
 
-UART0 参数：波特率 **1152000**，8 位数据位，无校验，1 位停止位，无流控。
+UART0 参数：波特率 **115200**，8 位数据位，无校验，1 位停止位，无流控。
 样例原理图可参见 **sch_meter.pdf**
 ## UART 命令协议
 
@@ -74,8 +74,8 @@ config.sh  build.sh  debug.sh   # menuconfig / 编译 / 串口监视脚本
 1. 上电后 `app_main` 依次执行：初始化 INA226 I2C → 初始化按键与指示灯 →
    写入 INA226 校准寄存器（`reg 5 = 2560`）→ 启动 UART0 接收任务。
 2. 按下 KEY1 或收到 `START` 命令 → 开始测量：能量与峰值清零，LED 呼吸点亮。
-3. 采样循环按周期触发（1 ms 定时标志）读取 INA226，调用 `anaPower` 累加能量并刷新峰值，
-   每 200 次采样刷新一次显示 / 输出。
+3. 采样循环由 `esp_timer` 1 ms 周期回调触发，读取 INA226，调用 `anaPower` 累加能量并刷新峰值，
+   每 200 次采样累计一次运行时间（无显示刷新）。
 4. 按下 KEY3 或收到 `STOP` 命令 → 停止测量，LED 呼吸暂停。
 5. 上位机可随时发送 `E` / `PEAK` 命令读取当前累计能量或峰值功率。
 
@@ -94,7 +94,9 @@ config.sh  build.sh  debug.sh   # menuconfig / 编译 / 串口监视脚本
 ## 当前状态
 
 - 当前加入编译的源文件为：`main.c`、`ina226/ina226.c`、`keys/mykeys.c`、`uart0/uart0.c`、`mytimer/mytimer.c`。
-- 周期采样与刷新循环位于 `main/gui.c`，目前未加入 `main/CMakeLists.txt` 的编译列表，
-  `app_main` 中对应的任务创建也处于注释状态。因此当前固件完成的是**各模块初始化 + 按键 + UART 命令**，
-  完整的采样/显示循环尚未启用。
+- 采样/能量累计循环已从废弃的 `main/gui.c` 取回并放入 `main.c`：`app_main` 通过 `esp_timer`
+  注册一个 **1 ms** 周期定时器（`meter_sample_cb`），到期读取 INA226 并调用 `anaPower`，
+  每 200 次采样累计一次运行时间；不再经过 `mytimer` / GPTimer 封装，也不含 LVGL 显示刷新。
+- 因此当前固件完成的是**各模块初始化 + 1 ms 采样/能量累计 + 按键 + UART 命令**。
+- `gui.c` / `app.c` 等 LVGL 显示相关代码仍未加入编译列表。
 - `myusb_init`、`tempSensor_init`、`initI2CSlave` 等调用在 `app_main` 中已注释，属于预留功能。

@@ -21,7 +21,7 @@ static const char *TAG = "uart0";
 #define ECHO_TEST_CTS (UART_PIN_NO_CHANGE)
 
 #define ECHO_UART_PORT_NUM      (UART_NUM_0)
-#define ECHO_UART_BAUD_RATE     (1152000)
+#define ECHO_UART_BAUD_RATE     (115200)
 #define ECHO_TASK_STACK_SIZE    (2048)
 
 #define BUF_SIZE                (1024)
