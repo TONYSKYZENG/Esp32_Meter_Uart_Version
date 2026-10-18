@@ -78,19 +78,25 @@ void stopMes(void)
     stopShow();
 }
 
-void anaPower(void)
+void anaPower(uint32_t elapsed_ms)
 {
-    double temp_i;
-
-    if (g_workSt) {
-        temp_i = g_i0 + g_i1;
-        /* g_i: mA, g_v: mV -> 瞬时功率 P = i * v * 1e-6 (W)
-         * 单个采样周期的能量 E = P * (METER_SAMPLE_PERIOD_MS 毫秒)，累加得到 g_power(J) */
-        g_power += temp_i * g_v1 * 0.001 * 0.001 * (METER_SAMPLE_PERIOD_MS * 0.001);
-        if (g_w1 > g_peak) {
-            g_peak = g_w1;
-        }
+    if (!g_workSt) {
+        return;
     }
+
+    /* 峰值取瞬时功率，与积分时间无关，先更新 */
+    if (g_w1 > g_peak) {
+        g_peak = g_w1;
+    }
+
+    if (elapsed_ms == 0) {
+        return;
+    }
+
+    /* g_i: mA, g_v: mV -> 瞬时功率 P(W) = i * v * 1e-3 * 1e-3
+     * 本周期能量 E(J) = P(W) * elapsed_ms * 1e-3，累加到 g_power */
+    const double power_w = (g_i0 + g_i1) * g_v1 * 0.001 * 0.001;
+    g_power += power_w * (elapsed_ms * 0.001);
 }
 
 static void IRAM_ATTR gpio_isr_handler(void *arg)

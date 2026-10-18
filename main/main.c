@@ -67,27 +67,30 @@ static void meter_timer_cb(void *arg)
     }
 }
 
-/* 采样任务：每次通知采样一次，阻塞式 I2C 读取放在任务里完成 */
+/* 采样任务：每次通知采样一次，阻塞式 I2C 读取放在任务里完成。
+ * 能量按两次采样之间的实际经过时间积分，因此丢 tick / 调度抖动不会累计误差。 */
 static void meter_task(void *arg)
 {
     (void)arg;
 
+    int64_t last_sample_us = esp_timer_get_time();
+
     for (;;) {
-        /* 阻塞等待周期通知；返回值为自上次取走以来累积的通知次数 */
-        uint32_t samples = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        /* 阻塞等待周期通知；多次通知合并为一次采样，用 Δt 覆盖整段时间 */
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-        /* 正常情况下 samples == 1；若任务曾被抢占导致累积了多次通知，
-         * 按实际次数补采样，避免能量积分因丢 tick 而偏小 */
-        for (uint32_t i = 0; i < samples; i++) {
-            g_v1 = ina226_getV(1);
-            g_i1 = ina226_getI(1);
-            g_w1 = ina226_getW(1);
-            anaPower();
+        const int64_t now_us = esp_timer_get_time();
+        const uint32_t elapsed_ms = (uint32_t)((now_us - last_sample_us) / 1000);
+        last_sample_us = now_us;
 
-            if (++g_isrTime >= METER_RUNTIME_DIVIDER) {
-                g_isrTime = 0;
-                g_runTime++;
-            }
+        g_v1 = ina226_getV(1);
+        g_i1 = ina226_getI(1);
+        g_w1 = ina226_getW(1);
+        anaPower(elapsed_ms);
+
+        if (++g_isrTime >= METER_RUNTIME_DIVIDER) {
+            g_isrTime = 0;
+            g_runTime++;
         }
     }
 }
