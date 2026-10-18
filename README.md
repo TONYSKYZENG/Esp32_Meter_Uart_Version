@@ -95,8 +95,8 @@ config.sh  build.sh  debug.sh   # menuconfig / 编译 / 串口监视脚本
 
 - 当前加入编译的源文件为：`main.c`、`ina226/ina226.c`、`keys/mykeys.c`、`uart0/uart0.c`、`mytimer/mytimer.c`。
 - 采样/能量累计循环已从废弃的 `main/gui.c` 取回并放入 `main.c`：`app_main` 通过 `esp_timer`
-  注册一个 **1 ms** 周期定时器（`meter_sample_cb`），到期读取 INA226 并调用 `anaPower`，
+  注册一个 **5 ms** 周期定时器（`meter_sample_cb`），到期读取 INA226 并调用 `anaPower`，
   每 200 次采样累计一次运行时间；不再经过 `mytimer` / GPTimer 封装，也不含 LVGL 显示刷新。
-- 因此当前固件完成的是**各模块初始化 + 1 ms 采样/能量累计 + 按键 + UART 命令**。
+- 因此当前固件完成的是**各模块初始化 + 5 ms 采样/能量累计 + 按键 + UART 命令**。
 - `gui.c` / `app.c` 等 LVGL 显示相关代码仍未加入编译列表。
 - `myusb_init`、`tempSensor_init`、`initI2CSlave` 等调用在 `app_main` 中已注释，属于预留功能。
