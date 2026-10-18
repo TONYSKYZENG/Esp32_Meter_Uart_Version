@@ -10,6 +10,7 @@ set(COMPONENT_SRCS "main.c"
 "keys/mykeys.c"
 "uart0/uart0.c"
 "mytimer/mytimer.c"
+"lvgl/gui.c" "lvgl/boot_strap.c"
 )
 set(COMPONENT_ADD_INCLUDEDIRS 
 "keys"

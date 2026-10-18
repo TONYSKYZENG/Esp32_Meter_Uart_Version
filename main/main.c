@@ -55,7 +55,7 @@ static void meter_init(void);
  **********************/
 static TaskHandle_t s_meter_task = NULL;
 static esp_timer_handle_t s_meter_timer = NULL;
-
+extern void app_main_lvgl_drv(void);
 /* 定时器回调运行在 esp_timer 任务上下文里：只发一个任务通知就返回，
  * 绝不在这里做 I2C 等阻塞操作（否则会拖垮 esp_timer 任务、破坏时基）。 */
 static void meter_timer_cb(void *arg)
@@ -137,5 +137,6 @@ mykeys_init();
    initUart0();
    /* 启动采样：esp_timer 5 ms 周期通知采样任务 */
    meter_init();
+   app_main_lvgl_drv();
    // xTaskCreatePinnedToCore(guiTask, "gui", 4096*8, NULL, 0, NULL, 1);
 }
