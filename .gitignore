@@ -68,3 +68,5 @@ platformio.ini
 
 # VS Code
 .vscode/
+managed_components
+dependencies.lock
